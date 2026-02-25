@@ -1,0 +1,9 @@
+services:
+  chenbanxian-middleware:
+    build: .
+    container_name: chenbanxian-middleware
+    ports:
+      - "8787:8787"
+    env_file:
+      - .env
+    restart: unless-stopped

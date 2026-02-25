@@ -56,10 +56,30 @@ bash scripts/install.sh
 - 生成 `.env`（如果你还没建）
 - 若当前是 root + systemd 环境：自动注册并启动 `chenbanxian-middleware.service`
 
+> Debian/Ubuntu 如果报 `ensurepip is not available`，先安装：
+> `apt install -y python3-venv`
+
 ### 3) 健康检查
 
 ```bash
 curl http://127.0.0.1:8787/health
+```
+
+---
+
+## Docker 部署（可选）
+
+如果你不想装本机 Python 依赖，可以直接 Docker 跑：
+
+```bash
+docker compose up -d --build
+curl http://127.0.0.1:8787/health
+```
+
+停止：
+
+```bash
+docker compose down
 ```
 
 ---
