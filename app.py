@@ -102,6 +102,9 @@ class ChartResponse(BaseModel):
     ok: bool
     engine: str
     chart: dict[str, Any] | None = None
+    visualization_url: str | None = None
+    share_ttl_seconds: int | None = None
+    share_notice: str | None = None
     reason: str | None = None
 
 
@@ -200,6 +203,53 @@ def generate_iztro_chart(birth_date: str, birth_hour: int, gender: str, lang: st
     if not isinstance(data, dict) or not data.get("ok"):
         raise RuntimeError(f"iztro_bad_output:{data}")
     return data
+
+
+def _format_ttl_cn(ttl_seconds: int) -> str:
+    if ttl_seconds % 3600 == 0:
+        h = ttl_seconds // 3600
+        return f"{h}小时"
+    if ttl_seconds % 60 == 0:
+        m = ttl_seconds // 60
+        return f"{m}分钟"
+    return f"{ttl_seconds}秒"
+
+
+async def create_visual_share_link(chart_payload: dict[str, Any]) -> tuple[str | None, int | None, str | None]:
+    if not _env_bool("ENABLE_VIS_SHARE", True):
+        return None, None, None
+
+    api_url = os.getenv("VIS_SHARE_API_URL", "").strip()
+    if not api_url:
+        return None, None, None
+
+    ttl = _env_int("VIS_SHARE_TTL_SECONDS", 7200)
+    ttl = max(300, min(86400, ttl))
+    timeout = _env_float("VIS_SHARE_TIMEOUT_SECONDS", 12)
+    public_base = os.getenv("VIS_SHARE_PUBLIC_BASE", "https://zw.120323.xyz").rstrip("/")
+
+    body = dict(chart_payload)
+    body["ttlSeconds"] = ttl
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(api_url, json=body)
+            r.raise_for_status()
+            data = r.json()
+    except Exception:
+        return None, None, None
+
+    share_url = data.get("share_url") if isinstance(data, dict) else None
+    token = data.get("token") if isinstance(data, dict) else None
+
+    if (not share_url) and token:
+        share_url = f"{public_base}/c?d={token}"
+
+    if not share_url:
+        return None, None, None
+
+    notice = f"该可视化链接默认保留{_format_ttl_cn(ttl)}，到期自动失效。"
+    return str(share_url), ttl, notice
 
 
 # --------------------------
@@ -419,7 +469,15 @@ async def chart(req: ChartRequest) -> ChartResponse:
             lang=req.lang,
             fix_leap=req.fix_leap,
         )
-        return ChartResponse(ok=True, engine="iztro", chart=data)
+        share_url, share_ttl_seconds, share_notice = await create_visual_share_link(data)
+        return ChartResponse(
+            ok=True,
+            engine="iztro",
+            chart=data,
+            visualization_url=share_url,
+            share_ttl_seconds=share_ttl_seconds,
+            share_notice=share_notice,
+        )
     except Exception as e:
         return ChartResponse(ok=False, engine="iztro", reason=f"{type(e).__name__}:{e}")
 

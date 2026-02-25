@@ -167,6 +167,9 @@ bash scripts/batch_import_from_dir.sh \
 - `engine`: 固定 `iztro`
 - `chart.basic`: 基础盘面信息（命主、身主、五行局等）
 - `chart.palaces`: 十二宫结构化数据（可直接用于前端可视化渲染）
+- `visualization_url`: 可视化短链（若开启分享）
+- `share_ttl_seconds`: 短链保留秒数（默认 7200）
+- `share_notice`: 到期提示文案（由中间层统一输出）
 
 ### `POST /ask`
 
@@ -199,6 +202,11 @@ bash scripts/batch_import_from_dir.sh \
 - `GROUP_REQUIRE_ADDRESSED`：群聊是否要求被@或回复
 - `ENABLE_INTENT_GATE`：是否启用命理意图闸门
 - `BASELINE_*`：检索基线参数（limit/min_score 等）
+- `ENABLE_VIS_SHARE`：是否启用中间层自动生成可视化短链
+- `VIS_SHARE_API_URL`：可视化分享 API（如 `https://zw.120323.xyz/api/share`）
+- `VIS_SHARE_PUBLIC_BASE`：短链公开域名（用于 token 回退拼接）
+- `VIS_SHARE_TTL_SECONDS`：短链保留时长（默认 `7200`）
+- `VIS_SHARE_TIMEOUT_SECONDS`：分享 API 超时秒数
 
 ---
 
