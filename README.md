@@ -13,10 +13,11 @@
 
 ## 你能得到什么
 
-- 一个 FastAPI 服务：`POST /ask`、`GET /health`
+- 一个 FastAPI 服务：`POST /ask`、`GET /health`、`GET /preflight`
 - 双路由能力：
   - 紫微斗数 → Open Notebook 检索 + 证据综合
   - 非紫微 → 直连 LLM（无搜索）
+- 一套重启后烟雾测试脚本：`scripts/smoke_test.sh`
 - 一键安装脚本：`scripts/install.sh`
 - 一键卸载脚本：`scripts/uninstall.sh`（支持 dry-run / purge）
 - 批量导入脚本：`scripts/batch_import_from_dir.sh`（把本地目录文件批量导入 notebook）

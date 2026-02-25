@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-app = FastAPI(title="Chenbanxian Middleware", version="0.2.0")
+app = FastAPI(title="Chenbanxian Middleware", version="0.3.0")
 
 ZIWEI_KEYWORDS = [
     "紫微",
@@ -153,6 +153,14 @@ def is_ziweidoushu_intent(text: str) -> bool:
     return any(k in t for k in ZIWEI_KEYWORDS)
 
 
+def build_answer_policy() -> str:
+    # 统一“非模板化”约束，不允许固定填空结构
+    return (
+        "回答必须自然对话化，禁止使用固定模板标题（如‘结论：/依据：/建议：’）。"
+        "可以分段，但不要机械套格式。"
+    )
+
+
 def build_retrieval_params(question: str) -> dict[str, Any]:
     params = {
         "type": os.getenv("BASELINE_SEARCH_TYPE", "vector"),
@@ -207,6 +215,7 @@ def pick_evidence(hits: list[dict[str, Any]], min_score: float) -> tuple[list[di
 async def answer_direct_llm(question: str) -> str:
     system = (
         "你是陈半仙。保持自然、口语化、非模板化输出。"
+        f"{build_answer_policy()}"
         "不要编造具体命盘事实；若信息不足，明确说明不确定并给出下一步提问建议。"
     )
     user = f"用户问题：{question}"
@@ -227,6 +236,7 @@ async def answer_ziweidoushu_with_kb(question: str, evidence_hits: list[dict[str
     system = (
         "你是陈半仙。请根据证据回答紫微斗数问题。"
         "输出要自然、非模板化、像真人对话，不要机械套话。"
+        f"{build_answer_policy()}"
         "严禁超出证据硬编；若证据不足，要直接说不确定。"
     )
 
@@ -244,11 +254,54 @@ async def answer_ziweidoushu_with_kb(question: str, evidence_hits: list[dict[str
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "version": "0.2.0",
+        "version": "0.3.0",
         "open_notebook": notebook.base_url,
         "search_path": notebook.search_path,
         "llm_enabled": llm.enabled,
+        "group_require_addressed": _env_bool("GROUP_REQUIRE_ADDRESSED", True),
     }
+
+
+@app.get("/preflight")
+async def preflight() -> dict[str, Any]:
+    checks: dict[str, Any] = {
+        "open_notebook": {"ok": False, "detail": ""},
+        "llm": {"ok": False, "detail": ""},
+    }
+
+    # Open Notebook connectivity
+    try:
+        url = f"{notebook.base_url}/health"
+        async with httpx.AsyncClient(timeout=min(notebook.timeout, 8)) as client:
+            r = await client.get(url)
+        checks["open_notebook"] = {
+            "ok": r.status_code < 500,
+            "detail": f"status={r.status_code}",
+        }
+    except Exception as e:
+        checks["open_notebook"] = {"ok": False, "detail": type(e).__name__}
+
+    # LLM connectivity (minimal)
+    if llm.enabled and llm.base_url:
+        try:
+            test_payload = {
+                "model": llm.model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            }
+            headers = {"Content-Type": "application/json"}
+            if llm.api_key:
+                headers["Authorization"] = f"Bearer {llm.api_key}"
+            async with httpx.AsyncClient(timeout=min(llm.timeout, 8)) as client:
+                r = await client.post(f"{llm.base_url}/chat/completions", headers=headers, json=test_payload)
+            checks["llm"] = {"ok": r.status_code < 500, "detail": f"status={r.status_code}"}
+        except Exception as e:
+            checks["llm"] = {"ok": False, "detail": type(e).__name__}
+    else:
+        checks["llm"] = {"ok": False, "detail": "disabled_or_missing_base_url"}
+
+    overall = checks["open_notebook"]["ok"] and checks["llm"]["ok"]
+    return {"ok": overall, "checks": checks}
 
 
 @app.post("/ask", response_model=AskResponse)
