@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-app = FastAPI(title="Chenbanxian Middleware", version="0.4.0")
+app = FastAPI(title="Chenbanxian Middleware", version="0.5.0")
 
 ZIWEI_KEYWORDS = [
     "紫微",
@@ -26,6 +26,14 @@ ZIWEI_KEYWORDS = [
     "化权",
     "化科",
     "化忌",
+]
+
+REPORT_TRIGGERS = [
+    "来源分级",
+    "报告模式",
+    "报告格式",
+    "证据分层",
+    "分级来源",
 ]
 
 
@@ -161,6 +169,11 @@ def build_answer_policy() -> str:
     )
 
 
+def need_report_mode(text: str) -> bool:
+    t = text.strip().lower()
+    return any(x in t for x in REPORT_TRIGGERS)
+
+
 def build_retrieval_params(question: str) -> dict[str, Any]:
     params = {
         "type": os.getenv("BASELINE_SEARCH_TYPE", "vector"),
@@ -212,28 +225,51 @@ def pick_evidence(hits: list[dict[str, Any]], min_score: float) -> tuple[list[di
     return strong, citations
 
 
-async def answer_direct_llm(question: str) -> str:
-    system = (
-        "你是陈半仙。保持自然、口语化、非模板化输出。"
-        f"{build_answer_policy()}"
-        "不要编造具体命盘事实；若信息不足，明确说明不确定并给出下一步提问建议。"
-    )
+async def answer_direct_llm(question: str, report_mode: bool = False) -> str:
+    if report_mode:
+        system = (
+            "你是陈半仙。当前用户明确要求报告输出。"
+            "请用结构化报告写法：结论、依据、建议。"
+            "若有证据层级，请按‘师门内证/外部资料/经验推断’分层。"
+            "不要暴露AI身份。"
+        )
+    else:
+        system = (
+            "你是陈半仙。保持自然、口语化、非模板化输出。"
+            f"{build_answer_policy()}"
+            "不要编造具体命盘事实；若信息不足，明确说明不确定并给出下一步提问建议。"
+            "不要主动透露AI或模型身份。"
+        )
     user = f"用户问题：{question}"
     return await llm.chat(system=system, user=user, temperature=0.5)
 
 
-async def answer_ziweidoushu_fallback_without_kb(question: str) -> str:
-    system = (
-        "你是陈半仙。当前知识库未命中时，先明确表达："
-        "‘师傅这一项还没亲授，我得先去翻资料再给你稳妥答复。’"
-        "然后给出一个保守、可执行的初步建议，不要装作已经掌握全部细节。"
-        f"{build_answer_policy()}"
-    )
+async def answer_ziweidoushu_fallback_without_kb(question: str, report_mode: bool = False) -> str:
+    if report_mode:
+        system = (
+            "你是陈半仙。用户明确要求报告模式。"
+            "在知识库未命中时，用报告体说明：‘师门未授，需查证后复核’，"
+            "并给出保守建议。可用‘师门内证/外部资料/经验推断’分层。"
+            "不要暴露AI身份。"
+        )
+    else:
+        system = (
+            "你是陈半仙。当前知识库未命中时，先明确表达："
+            "‘师傅这一项还没亲授，我得先去翻资料再给你稳妥答复。’"
+            "然后给出一个保守、可执行的初步建议，不要装作已经掌握全部细节。"
+            f"{build_answer_policy()}"
+            "不要主动透露AI或模型身份。"
+        )
     user = f"用户问题：{question}"
     return await llm.chat(system=system, user=user, temperature=0.45)
 
 
-async def answer_ziweidoushu_with_kb(question: str, evidence_hits: list[dict[str, Any]], citations: list[str]) -> str:
+async def answer_ziweidoushu_with_kb(
+    question: str,
+    evidence_hits: list[dict[str, Any]],
+    citations: list[str],
+    report_mode: bool = False,
+) -> str:
     snippets: list[str] = []
     for h in evidence_hits[:5]:
         txt = h.get("content") or h.get("text") or h.get("snippet") or ""
@@ -244,12 +280,21 @@ async def answer_ziweidoushu_with_kb(question: str, evidence_hits: list[dict[str
     evidence_block = "\n".join(f"- {s}" for s in snippets) if snippets else "- （无可用片段）"
     cite_block = "\n".join(f"- {c}" for c in citations) if citations else "- （无）"
 
-    system = (
-        "你是陈半仙。请根据证据回答紫微斗数问题。"
-        "输出要自然、非模板化、像真人对话，不要机械套话。"
-        f"{build_answer_policy()}"
-        "严禁超出证据硬编；若证据不足，要直接说不确定。"
-    )
+    if report_mode:
+        system = (
+            "你是陈半仙。用户明确要求报告模式。"
+            "请按结构化报告输出：结论、依据、建议。"
+            "依据中优先列师门内证（知识库命中），再列外部资料（若有），最后列经验推断。"
+            "不要暴露AI身份。"
+        )
+    else:
+        system = (
+            "你是陈半仙。请根据证据回答紫微斗数问题。"
+            "输出要自然、非模板化、像真人对话，不要机械套话。"
+            f"{build_answer_policy()}"
+            "严禁超出证据硬编；若证据不足，要直接说不确定。"
+            "不要主动透露AI或模型身份。"
+        )
 
     user = (
         f"用户问题：{question}\n\n"
@@ -265,7 +310,7 @@ async def answer_ziweidoushu_with_kb(question: str, evidence_hits: list[dict[str
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "version": "0.4.0",
+        "version": "0.5.0",
         "open_notebook": notebook.base_url,
         "search_path": notebook.search_path,
         "llm_enabled": llm.enabled,
@@ -328,11 +373,12 @@ async def ask(req: AskRequest) -> AskResponse:
         )
 
     ziwei = is_ziweidoushu_intent(question)
+    report_mode = need_report_mode(question)
 
     # Route A: non-ziwei -> direct LLM (no search)
     if not ziwei:
         try:
-            answer = await answer_direct_llm(question)
+            answer = await answer_direct_llm(question, report_mode=report_mode)
             return AskResponse(
                 should_answer=True,
                 mode="direct-llm",
@@ -370,7 +416,7 @@ async def ask(req: AskRequest) -> AskResponse:
     if not strong_hits:
         fallback_answer = "师傅这一项还没亲授，我得先去翻资料再给你稳妥答复。"
         try:
-            fallback_answer = await answer_ziweidoushu_fallback_without_kb(question)
+            fallback_answer = await answer_ziweidoushu_fallback_without_kb(question, report_mode=report_mode)
         except Exception:
             pass
         return AskResponse(
@@ -384,7 +430,7 @@ async def ask(req: AskRequest) -> AskResponse:
         )
 
     try:
-        answer = await answer_ziweidoushu_with_kb(question, strong_hits, citations)
+        answer = await answer_ziweidoushu_with_kb(question, strong_hits, citations, report_mode=report_mode)
     except Exception:
         # LLM synth fallback to deterministic snippets
         snippets: list[str] = []

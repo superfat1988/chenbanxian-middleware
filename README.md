@@ -17,6 +17,9 @@
 - 双路由能力：
   - 紫微斗数 → Open Notebook 检索优先；未命中则 LLM 补答（带“师门未授、需查证”语义）
   - 非紫微 → 直连 LLM（无搜索）
+- 双输出模式：
+  - 默认 Human Mode（自然人类口语，不暴露 AI 身份）
+  - 显式触发 Report Mode（来源分级/报告格式）
 - 一键安装脚本：`scripts/install.sh`
 - 一键卸载脚本：`scripts/uninstall.sh`（支持 dry-run / purge）
 - 批量导入脚本：`scripts/batch_import_from_dir.sh`（把本地目录文件批量导入 notebook）
@@ -135,8 +138,14 @@ bash scripts/batch_import_from_dir.sh \
 
 ### 路由规则
 
-- `is_ziweidoushu_intent(question) == true`：走知识库（Open Notebook）
+- `is_ziweidoushu_intent(question) == true`：走知识库（Open Notebook）优先；未命中转 LLM 补答
 - 否则：走直连 LLM
+
+### 输出模式规则
+
+- 默认：Human Mode（自然对话，不显式展示分级与技术术语）
+- 当问题文本包含以下触发词之一时切 Report Mode：
+  - `来源分级` / `报告模式` / `报告格式` / `证据分层` / `分级来源`
 
 ### `POST /ask`
 
