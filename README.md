@@ -171,6 +171,17 @@ bash scripts/batch_import_from_dir.sh \
 /chart_get?date=1989-2-2&hour=7&gender=女&lang=zh-CN&fix_leap=true
 ```
 
+建议调用方式（不要写死 IP）：
+
+```text
+${MIDDLEWARE_BASE_URL}/chart_get?date=...&hour=...&gender=...
+```
+
+说明：
+- `http://192.168.2.185:8787/...` 仅在当前 NAS IP 不变时可用。
+- 更换 NAS / DHCP 改 IP / 网段变化后，该地址会失效。
+- 生产建议使用固定域名或反向代理域名（例如 `https://zw.120323.xyz` 或专用子域名）保持通用性。
+
 返回重点：
 - `engine`: 固定 `iztro`
 - `chart.basic`: 基础盘面信息（命主、身主、五行局等）
