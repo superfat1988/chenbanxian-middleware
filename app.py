@@ -10,15 +10,28 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-app = FastAPI(title="Chenbanxian RAG Middleware", version="0.1.0")
+app = FastAPI(title="Chenbanxian Middleware", version="0.2.0")
 
-FORTUNE_KEYWORDS = [
-    "算命", "命理", "八字", "四柱", "大运", "流年", "桃花", "财运", "事业运", "姻缘", "合婚", "五行", "紫微", "风水", "奇门", "六爻", "卦", "运势",
+ZIWEI_KEYWORDS = [
+    "紫微",
+    "斗数",
+    "命盘",
+    "四化",
+    "星曜",
+    "宫位",
+    "流年",
+    "大限",
+    "三方四正",
+    "化禄",
+    "化权",
+    "化科",
+    "化忌",
 ]
 
-TEACHING_KEYWORDS = ["教学", "原理", "怎么学", "解释", "入门", "讲解", "教程", "为什么"]
 
-
+# --------------------------
+# ENV helpers
+# --------------------------
 def _env_bool(name: str, default: bool) -> bool:
     v = os.getenv(name)
     if v is None:
@@ -46,11 +59,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+# --------------------------
+# Request/Response models
+# --------------------------
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
     chat_type: Literal["private", "group"] = "private"
     addressed: bool = True
-    teaching_preferred: bool = False
     force: bool = False
 
 
@@ -58,16 +73,19 @@ class AskResponse(BaseModel):
     should_answer: bool
     uncertain: bool = False
     reason: str | None = None
-    mode: Literal["fortune-qa", "teaching", "reject"]
+    mode: Literal["ziweidoushu-kb", "direct-llm", "reject"]
     retrieval_params: dict[str, Any] | None = None
     answer: str | None = None
     citations: list[str] = Field(default_factory=list)
     raw_hits: int = 0
 
 
+# --------------------------
+# Upstream clients
+# --------------------------
 class NotebookClient:
     def __init__(self) -> None:
-        self.base_url = os.getenv("OPEN_NOTEBOOK_BASE_URL", "http://192.168.2.185:5055").rstrip("/")
+        self.base_url = os.getenv("OPEN_NOTEBOOK_BASE_URL", "http://127.0.0.1:5055").rstrip("/")
         self.search_path = os.getenv("OPEN_NOTEBOOK_SEARCH_PATH", "/api/search")
         self.timeout = _env_float("OPEN_NOTEBOOK_TIMEOUT_SECONDS", 25)
 
@@ -79,23 +97,64 @@ class NotebookClient:
             return r.json()
 
 
+class LLMClient:
+    def __init__(self) -> None:
+        self.enabled = _env_bool("ENABLE_LLM", True)
+        self.base_url = os.getenv("LLM_BASE_URL", "").rstrip("/")
+        self.api_key = os.getenv("LLM_API_KEY", "")
+        self.model = os.getenv("LLM_MODEL", "gpt-5.3-codex")
+        self.timeout = _env_float("LLM_TIMEOUT_SECONDS", 40)
+
+    async def chat(self, *, system: str, user: str, temperature: float = 0.4) -> str:
+        if not self.enabled:
+            raise RuntimeError("llm_disabled")
+        if not self.base_url:
+            raise RuntimeError("llm_base_url_missing")
+
+        url = f"{self.base_url}/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        payload = {
+            "model": self.model,
+            "temperature": temperature,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            r.raise_for_status()
+            data = r.json()
+
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError("llm_empty_choices")
+
+        msg = (choices[0] or {}).get("message") or {}
+        content = msg.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("llm_empty_content")
+        return content.strip()
+
+
 notebook = NotebookClient()
+llm = LLMClient()
 
 
-def is_fortune_intent(text: str) -> bool:
+# --------------------------
+# Core logic
+# --------------------------
+def is_ziweidoushu_intent(text: str) -> bool:
     t = text.lower()
-    return any(k in t for k in FORTUNE_KEYWORDS)
+    return any(k in t for k in ZIWEI_KEYWORDS)
 
 
-def is_teaching_intent(text: str, teaching_preferred: bool) -> bool:
-    if teaching_preferred:
-        return True
-    t = text.lower()
-    return any(k in t for k in TEACHING_KEYWORDS)
-
-
-def build_retrieval_params(question: str, teaching: bool) -> dict[str, Any]:
-    p = {
+def build_retrieval_params(question: str) -> dict[str, Any]:
+    params = {
         "type": os.getenv("BASELINE_SEARCH_TYPE", "vector"),
         "limit": _env_int("BASELINE_LIMIT", 8),
         "minimum_score": _env_float("BASELINE_MIN_SCORE", 0.58),
@@ -103,16 +162,12 @@ def build_retrieval_params(question: str, teaching: bool) -> dict[str, Any]:
         "search_notes": _env_bool("BASELINE_SEARCH_NOTES", False),
     }
 
-    # 动态调参（最小）
     q = question.strip()
-    if teaching:
-        p["limit"] = max(int(p["limit"]), 10)
-        p["minimum_score"] = min(float(p["minimum_score"]), 0.52)
-    elif len(q) <= 8:
-        p["limit"] = min(int(p["limit"]), 6)
-        p["minimum_score"] = max(float(p["minimum_score"]), 0.62)
+    if len(q) <= 8:
+        params["limit"] = min(int(params["limit"]), 6)
+        params["minimum_score"] = max(float(params["minimum_score"]), 0.62)
 
-    return p
+    return params
 
 
 def normalize_hits(raw: Any) -> list[dict[str, Any]]:
@@ -143,90 +198,138 @@ def extract_citation(hit: dict[str, Any], idx: int) -> str:
     return f"{title} (score={score:.3f})"
 
 
-def build_answer(question: str, hits: list[dict[str, Any]], teaching: bool, min_score: float) -> tuple[bool, str, list[str]]:
+def pick_evidence(hits: list[dict[str, Any]], min_score: float) -> tuple[list[dict[str, Any]], list[str]]:
     strong = [h for h in hits if hit_score(h) >= min_score]
-    citations = [extract_citation(h, i + 1) for i, h in enumerate(strong[:4])]
+    citations = [extract_citation(h, i + 1) for i, h in enumerate(strong[:5])]
+    return strong, citations
 
-    if not strong:
-        return True, "我不确定。当前知识库证据不足，不能负责任地下结论。", []
 
+async def answer_direct_llm(question: str) -> str:
+    system = (
+        "你是陈半仙。保持自然、口语化、非模板化输出。"
+        "不要编造具体命盘事实；若信息不足，明确说明不确定并给出下一步提问建议。"
+    )
+    user = f"用户问题：{question}"
+    return await llm.chat(system=system, user=user, temperature=0.5)
+
+
+async def answer_ziweidoushu_with_kb(question: str, evidence_hits: list[dict[str, Any]], citations: list[str]) -> str:
     snippets: list[str] = []
-    for h in strong[:3]:
+    for h in evidence_hits[:5]:
         txt = h.get("content") or h.get("text") or h.get("snippet") or ""
-        txt = str(txt).strip().replace("\n", " ")
+        txt = str(txt).replace("\n", " ").strip()
         if txt:
-            snippets.append(txt[:180])
+            snippets.append(txt[:220])
 
-    if teaching:
-        ans = "基于现有命理资料，我先给教学式说明：\n" + "\n".join(f"- {s}" for s in snippets)
-    else:
-        ans = "基于检索到的命理证据，给你结论与依据：\n" + "\n".join(f"- {s}" for s in snippets)
+    evidence_block = "\n".join(f"- {s}" for s in snippets) if snippets else "- （无可用片段）"
+    cite_block = "\n".join(f"- {c}" for c in citations) if citations else "- （无）"
 
-    return False, ans, citations
+    system = (
+        "你是陈半仙。请根据证据回答紫微斗数问题。"
+        "输出要自然、非模板化、像真人对话，不要机械套话。"
+        "严禁超出证据硬编；若证据不足，要直接说不确定。"
+    )
+
+    user = (
+        f"用户问题：{question}\n\n"
+        f"检索证据片段：\n{evidence_block}\n\n"
+        f"可用引用：\n{cite_block}\n\n"
+        "请给出最终回答。"
+    )
+
+    return await llm.chat(system=system, user=user, temperature=0.35)
 
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
+        "version": "0.2.0",
         "open_notebook": notebook.base_url,
         "search_path": notebook.search_path,
+        "llm_enabled": llm.enabled,
     }
 
 
 @app.post("/ask", response_model=AskResponse)
 async def ask(req: AskRequest) -> AskResponse:
-    text = req.question.strip()
+    question = req.question.strip()
 
-    # 1) 触发判定
-    if not req.force:
-        if req.chat_type == "group" and _env_bool("GROUP_REQUIRE_ADDRESSED", True) and not req.addressed:
-            return AskResponse(should_answer=False, mode="reject", reason="group_not_addressed")
+    # Group gate
+    if not req.force and req.chat_type == "group" and _env_bool("GROUP_REQUIRE_ADDRESSED", True) and not req.addressed:
+        return AskResponse(
+            should_answer=False,
+            mode="reject",
+            reason="group_not_addressed",
+        )
 
-        if _env_bool("ENABLE_INTENT_GATE", True) and not is_fortune_intent(text):
+    ziwei = is_ziweidoushu_intent(question)
+
+    # Route A: non-ziwei -> direct LLM (no search)
+    if not ziwei:
+        try:
+            answer = await answer_direct_llm(question)
             return AskResponse(
-                should_answer=False,
-                mode="reject",
-                reason="non_fortune_intent",
-                answer="我只回答命理/算命相关问题。",
+                should_answer=True,
+                mode="direct-llm",
+                uncertain=False,
+                answer=answer,
+            )
+        except Exception as e:
+            return AskResponse(
+                should_answer=True,
+                mode="direct-llm",
+                uncertain=True,
+                reason=f"direct_llm_error:{type(e).__name__}",
+                answer="我现在给不了稳妥结论，先稍后再试一次。",
             )
 
-    # 2) 动态参数
-    teaching = is_teaching_intent(text, req.teaching_preferred)
-    retrieval_params = build_retrieval_params(text, teaching)
+    # Route B: ziwei -> Open Notebook retrieval
+    retrieval_params = build_retrieval_params(question)
+    payload = {"query": question, **retrieval_params}
 
-    payload = {
-        "query": text,
-        **retrieval_params,
-    }
-
-    # 3) 委托 Open Notebook 检索
     try:
         result = await notebook.search(payload)
     except Exception as e:
         return AskResponse(
             should_answer=True,
             uncertain=True,
-            mode="fortune-qa" if not teaching else "teaching",
-            reason=f"open_notebook_error: {type(e).__name__}",
+            mode="ziweidoushu-kb",
+            reason=f"open_notebook_error:{type(e).__name__}",
             retrieval_params=retrieval_params,
-            answer="我不确定。当前检索服务异常，请稍后重试。",
+            answer="知识库检索服务当前异常，稍后重试。",
         )
 
     hits = normalize_hits(result)
+    strong_hits, citations = pick_evidence(hits, float(retrieval_params["minimum_score"]))
 
-    # 4) 最小拒答与输出
-    uncertain, answer, citations = build_answer(
-        text,
-        hits,
-        teaching=teaching,
-        min_score=float(retrieval_params["minimum_score"]),
-    )
+    if not strong_hits:
+        return AskResponse(
+            should_answer=True,
+            uncertain=True,
+            mode="ziweidoushu-kb",
+            retrieval_params=retrieval_params,
+            raw_hits=len(hits),
+            citations=[],
+            answer="我不确定。当前知识库证据不足，不能负责任地下结论。",
+        )
+
+    try:
+        answer = await answer_ziweidoushu_with_kb(question, strong_hits, citations)
+    except Exception:
+        # LLM synth fallback to deterministic snippets
+        snippets: list[str] = []
+        for h in strong_hits[:3]:
+            txt = h.get("content") or h.get("text") or h.get("snippet") or ""
+            txt = str(txt).strip().replace("\n", " ")
+            if txt:
+                snippets.append(txt[:180])
+        answer = "\n".join(f"- {s}" for s in snippets) if snippets else "证据不足。"
 
     return AskResponse(
         should_answer=True,
-        uncertain=uncertain,
-        mode="teaching" if teaching else "fortune-qa",
+        uncertain=False,
+        mode="ziweidoushu-kb",
         retrieval_params=retrieval_params,
         answer=answer,
         citations=citations,

@@ -1,7 +1,8 @@
 # 陈半仙中间层（Chenbanxian Middleware）
 
 这是给“陈半仙 Agent ↔ Open Notebook”做的**最小编排中间层**：
-- 命理问题走知识库检索
+- 紫微斗数问题走知识库检索
+- 非紫微问题直连你自己的大模型（不走搜索引擎）
 - 触发规则可控（私聊/群聊）
 - 低证据时拒答（降低幻觉）
 - 支持一键安装 / 一键卸载
@@ -13,6 +14,9 @@
 ## 你能得到什么
 
 - 一个 FastAPI 服务：`POST /ask`、`GET /health`
+- 双路由能力：
+  - 紫微斗数 → Open Notebook 检索 + 证据综合
+  - 非紫微 → 直连 LLM（无搜索）
 - 一键安装脚本：`scripts/install.sh`
 - 一键卸载脚本：`scripts/uninstall.sh`（支持 dry-run / purge）
 - 批量导入脚本：`scripts/batch_import_from_dir.sh`（把本地目录文件批量导入 notebook）
@@ -129,6 +133,11 @@ bash scripts/batch_import_from_dir.sh \
 
 ## API
 
+### 路由规则
+
+- `is_ziweidoushu_intent(question) == true`：走知识库（Open Notebook）
+- 否则：走直连 LLM
+
 ### `POST /ask`
 
 请求示例：
@@ -146,10 +155,10 @@ bash scripts/batch_import_from_dir.sh \
 返回字段说明：
 - `should_answer`: 是否应该回答
 - `uncertain`: 是否低置信
-- `mode`: `fortune-qa` / `teaching` / `reject`
-- `retrieval_params`: 本次实际检索参数（可审计）
+- `mode`: `ziweidoushu-kb` / `direct-llm` / `reject`
+- `retrieval_params`: 本次实际检索参数（仅知识库路由有）
 - `answer`: 最终答复
-- `citations`: 引用列表
+- `citations`: 引用列表（仅知识库路由有）
 
 ---
 
