@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 from typing import Any, Literal
 
 import httpx
@@ -88,6 +90,21 @@ class AskResponse(BaseModel):
     raw_hits: int = 0
 
 
+class ChartRequest(BaseModel):
+    birth_date: str = Field(description="YYYY-M-D")
+    birth_hour: int = Field(ge=0, le=23)
+    gender: Literal["男", "女", "male", "female", "m", "f"] = "男"
+    lang: str = "zh-CN"
+    fix_leap: bool = True
+
+
+class ChartResponse(BaseModel):
+    ok: bool
+    engine: str
+    chart: dict[str, Any] | None = None
+    reason: str | None = None
+
+
 # --------------------------
 # Upstream clients
 # --------------------------
@@ -151,6 +168,38 @@ class LLMClient:
 
 notebook = NotebookClient()
 llm = LLMClient()
+
+
+def generate_iztro_chart(birth_date: str, birth_hour: int, gender: str, lang: str = "zh-CN", fix_leap: bool = True) -> dict[str, Any]:
+    # 强制使用 iztro 进行排盘，避免算法漂移
+    script = os.getenv("IZTRO_SCRIPT_PATH", "/app/scripts/iztro_chart.mjs")
+    cmd = [
+        "node",
+        script,
+        "--date",
+        birth_date,
+        "--hour",
+        str(birth_hour),
+        "--gender",
+        gender,
+        "--lang",
+        lang,
+        "--fixLeap",
+        "true" if fix_leap else "false",
+    ]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_env_int("IZTRO_TIMEOUT_SECONDS", 12))
+    if proc.returncode != 0:
+        raise RuntimeError(f"iztro_exec_failed:{proc.stderr.strip()[:180]}")
+
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        raise RuntimeError("iztro_empty_output")
+
+    data = json.loads(raw)
+    if not isinstance(data, dict) or not data.get("ok"):
+        raise RuntimeError(f"iztro_bad_output:{data}")
+    return data
 
 
 # --------------------------
@@ -358,6 +407,21 @@ async def preflight() -> dict[str, Any]:
 
     overall = checks["open_notebook"]["ok"] and checks["llm"]["ok"]
     return {"ok": overall, "checks": checks}
+
+
+@app.post("/chart", response_model=ChartResponse)
+async def chart(req: ChartRequest) -> ChartResponse:
+    try:
+        data = generate_iztro_chart(
+            birth_date=req.birth_date,
+            birth_hour=req.birth_hour,
+            gender=req.gender,
+            lang=req.lang,
+            fix_leap=req.fix_leap,
+        )
+        return ChartResponse(ok=True, engine="iztro", chart=data)
+    except Exception as e:
+        return ChartResponse(ok=False, engine="iztro", reason=f"{type(e).__name__}:{e}")
 
 
 @app.post("/ask", response_model=AskResponse)

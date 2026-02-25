@@ -1,0 +1,10 @@
+{
+  "name": "chenbanxian-middleware",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Middleware helpers for Chenbanxian",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "iztro": "^2.5.7"
+  }
+}

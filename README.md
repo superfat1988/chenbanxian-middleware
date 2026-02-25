@@ -13,7 +13,7 @@
 
 ## 你能得到什么
 
-- 一个 FastAPI 服务：`POST /ask`、`GET /health`、`GET /preflight`
+- 一个 FastAPI 服务：`POST /ask`、`POST /chart`、`GET /health`、`GET /preflight`
 - 双路由能力：
   - 紫微斗数 → Open Notebook 检索优先；未命中则 LLM 补答（带“师门未授、需查证”语义）
   - 非紫微 → 直连 LLM（无搜索）
@@ -146,6 +146,27 @@ bash scripts/batch_import_from_dir.sh \
 - 默认：Human Mode（自然对话，不显式展示分级与技术术语）
 - 当问题文本包含以下触发词之一时切 Report Mode：
   - `来源分级` / `报告模式` / `报告格式` / `证据分层` / `分级来源`
+
+### `POST /chart`（排盘）
+
+> 约束：排盘引擎固定为 `iztro`，用于保证计算口径一致。
+
+请求示例：
+
+```json
+{
+  "birth_date": "1990-8-15",
+  "birth_hour": 14,
+  "gender": "男",
+  "lang": "zh-CN",
+  "fix_leap": true
+}
+```
+
+返回重点：
+- `engine`: 固定 `iztro`
+- `chart.basic`: 基础盘面信息（命主、身主、五行局等）
+- `chart.palaces`: 十二宫结构化数据（可直接用于前端可视化渲染）
 
 ### `POST /ask`
 
