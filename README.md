@@ -163,6 +163,14 @@ bash scripts/batch_import_from_dir.sh \
 }
 ```
 
+### `GET /chart_get`（免 exec 的排盘接口，适合 Agent 直接 HTTP 调用）
+
+示例：
+
+```text
+/chart_get?date=1989-2-2&hour=7&gender=女&lang=zh-CN&fix_leap=true
+```
+
 返回重点：
 - `engine`: 固定 `iztro`
 - `chart.basic`: 基础盘面信息（命主、身主、五行局等）

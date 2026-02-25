@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-app = FastAPI(title="Chenbanxian Middleware", version="0.5.0")
+app = FastAPI(title="Chenbanxian Middleware", version="0.5.1")
 
 ZIWEI_KEYWORDS = [
     "紫微",
@@ -106,6 +106,26 @@ class ChartResponse(BaseModel):
     share_ttl_seconds: int | None = None
     share_notice: str | None = None
     reason: str | None = None
+
+
+def _normalize_gender(gender: str) -> str:
+    g = (gender or "").strip().lower()
+    if g in {"男", "male", "m"}:
+        return "男"
+    if g in {"女", "female", "f"}:
+        return "女"
+    return gender
+
+
+def build_chart_result(birth_date: str, birth_hour: int, gender: str, lang: str = "zh-CN", fix_leap: bool = True) -> ChartResponse:
+    data = generate_iztro_chart(
+        birth_date=birth_date,
+        birth_hour=birth_hour,
+        gender=_normalize_gender(gender),
+        lang=lang,
+        fix_leap=fix_leap,
+    )
+    return ChartResponse(ok=True, engine="iztro", chart=data)
 
 
 # --------------------------
@@ -409,7 +429,7 @@ async def answer_ziweidoushu_with_kb(
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "version": "0.5.0",
+        "version": "0.5.1",
         "open_notebook": notebook.base_url,
         "search_path": notebook.search_path,
         "llm_enabled": llm.enabled,
@@ -459,25 +479,48 @@ async def preflight() -> dict[str, Any]:
     return {"ok": overall, "checks": checks}
 
 
+@app.get("/chart_get", response_model=ChartResponse)
+async def chart_get(
+    date: str,
+    hour: int,
+    gender: str,
+    lang: str = "zh-CN",
+    fix_leap: bool = True,
+) -> ChartResponse:
+    try:
+        if hour < 0 or hour > 23:
+            return ChartResponse(ok=False, engine="iztro", reason="ValueError:hour_out_of_range")
+        result = build_chart_result(
+            birth_date=date,
+            birth_hour=hour,
+            gender=gender,
+            lang=lang,
+            fix_leap=fix_leap,
+        )
+        share_url, share_ttl_seconds, share_notice = await create_visual_share_link(result.chart or {})
+        result.visualization_url = share_url
+        result.share_ttl_seconds = share_ttl_seconds
+        result.share_notice = share_notice
+        return result
+    except Exception as e:
+        return ChartResponse(ok=False, engine="iztro", reason=f"{type(e).__name__}:{e}")
+
+
 @app.post("/chart", response_model=ChartResponse)
 async def chart(req: ChartRequest) -> ChartResponse:
     try:
-        data = generate_iztro_chart(
+        result = build_chart_result(
             birth_date=req.birth_date,
             birth_hour=req.birth_hour,
             gender=req.gender,
             lang=req.lang,
             fix_leap=req.fix_leap,
         )
-        share_url, share_ttl_seconds, share_notice = await create_visual_share_link(data)
-        return ChartResponse(
-            ok=True,
-            engine="iztro",
-            chart=data,
-            visualization_url=share_url,
-            share_ttl_seconds=share_ttl_seconds,
-            share_notice=share_notice,
-        )
+        share_url, share_ttl_seconds, share_notice = await create_visual_share_link(result.chart or {})
+        result.visualization_url = share_url
+        result.share_ttl_seconds = share_ttl_seconds
+        result.share_notice = share_notice
+        return result
     except Exception as e:
         return ChartResponse(ok=False, engine="iztro", reason=f"{type(e).__name__}:{e}")
 
