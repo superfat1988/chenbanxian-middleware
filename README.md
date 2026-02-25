@@ -159,7 +159,10 @@ bash scripts/batch_import_from_dir.sh \
   "birth_hour": 14,
   "gender": "男",
   "lang": "zh-CN",
-  "fix_leap": true
+  "fix_leap": true,
+  "include_horoscope": true,
+  "target_date": "2026-02-26",
+  "target_hour": 10
 }
 ```
 
@@ -169,6 +172,12 @@ bash scripts/batch_import_from_dir.sh \
 
 ```text
 /chart_get?date=1989-2-2&hour=7&gender=女&lang=zh-CN&fix_leap=true
+```
+
+带运限（大限/小限/流年/流月/流日/流时）示例：
+
+```text
+/chart_get?date=1989-2-2&hour=7&gender=女&lang=zh-CN&fix_leap=true&include_horoscope=true&target_date=2026-02-26&target_hour=10
 ```
 
 建议调用方式（不要写死 IP）：
@@ -186,6 +195,13 @@ ${MIDDLEWARE_BASE_URL}/chart_get?date=...&hour=...&gender=...
 - `engine`: 固定 `iztro`
 - `chart.basic`: 基础盘面信息（命主、身主、五行局等）
 - `chart.palaces`: 十二宫结构化数据（可直接用于前端可视化渲染）
+- `chart.horoscope`（当 `include_horoscope=true`）:
+  - `decadal`（大限）
+  - `age`（小限）
+  - `yearly`（流年）
+  - `monthly`（流月）
+  - `daily`（流日）
+  - `hourly`（流时）
 - `visualization_url`: 可视化短链（若开启分享）
 - `share_ttl_seconds`: 短链保留秒数（默认 7200）
 - `share_notice`: 到期提示文案（由中间层统一输出）

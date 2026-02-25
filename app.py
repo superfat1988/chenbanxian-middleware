@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-app = FastAPI(title="Chenbanxian Middleware", version="0.5.2")
+app = FastAPI(title="Chenbanxian Middleware", version="0.6.0")
 
 # 允许局域网前端跨域访问（默认 *，可通过 CORS_ALLOW_ORIGINS 收敛）
 _cors_raw = os.getenv("CORS_ALLOW_ORIGINS", "*").strip()
@@ -111,6 +111,9 @@ class ChartRequest(BaseModel):
     gender: Literal["男", "女", "male", "female", "m", "f"] = "男"
     lang: str = "zh-CN"
     fix_leap: bool = True
+    include_horoscope: bool = False
+    target_date: str | None = Field(default=None, description="YYYY-M-D; when include_horoscope=true")
+    target_hour: int | None = Field(default=None, ge=0, le=23, description="0-23; when include_horoscope=true")
 
 
 class ChartResponse(BaseModel):
@@ -132,13 +135,25 @@ def _normalize_gender(gender: str) -> str:
     return gender
 
 
-def build_chart_result(birth_date: str, birth_hour: int, gender: str, lang: str = "zh-CN", fix_leap: bool = True) -> ChartResponse:
+def build_chart_result(
+    birth_date: str,
+    birth_hour: int,
+    gender: str,
+    lang: str = "zh-CN",
+    fix_leap: bool = True,
+    include_horoscope: bool = False,
+    target_date: str | None = None,
+    target_hour: int | None = None,
+) -> ChartResponse:
     data = generate_iztro_chart(
         birth_date=birth_date,
         birth_hour=birth_hour,
         gender=_normalize_gender(gender),
         lang=lang,
         fix_leap=fix_leap,
+        include_horoscope=include_horoscope,
+        target_date=target_date,
+        target_hour=target_hour,
     )
     return ChartResponse(ok=True, engine="iztro", chart=data)
 
@@ -208,7 +223,16 @@ notebook = NotebookClient()
 llm = LLMClient()
 
 
-def generate_iztro_chart(birth_date: str, birth_hour: int, gender: str, lang: str = "zh-CN", fix_leap: bool = True) -> dict[str, Any]:
+def generate_iztro_chart(
+    birth_date: str,
+    birth_hour: int,
+    gender: str,
+    lang: str = "zh-CN",
+    fix_leap: bool = True,
+    include_horoscope: bool = False,
+    target_date: str | None = None,
+    target_hour: int | None = None,
+) -> dict[str, Any]:
     # 强制使用 iztro 进行排盘，避免算法漂移
     script = os.getenv("IZTRO_SCRIPT_PATH", "/app/scripts/iztro_chart.mjs")
     cmd = [
@@ -224,7 +248,14 @@ def generate_iztro_chart(birth_date: str, birth_hour: int, gender: str, lang: st
         lang,
         "--fixLeap",
         "true" if fix_leap else "false",
+        "--includeHoroscope",
+        "true" if include_horoscope else "false",
     ]
+
+    if include_horoscope and target_date:
+        cmd.extend(["--targetDate", target_date])
+    if include_horoscope and target_hour is not None:
+        cmd.extend(["--targetHour", str(target_hour)])
 
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_env_int("IZTRO_TIMEOUT_SECONDS", 12))
     if proc.returncode != 0:
@@ -444,7 +475,7 @@ async def answer_ziweidoushu_with_kb(
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "version": "0.5.2",
+        "version": "0.6.0",
         "open_notebook": notebook.base_url,
         "search_path": notebook.search_path,
         "llm_enabled": llm.enabled,
@@ -501,6 +532,9 @@ async def chart_get(
     gender: str,
     lang: str = "zh-CN",
     fix_leap: bool = True,
+    include_horoscope: bool = False,
+    target_date: str | None = None,
+    target_hour: int | None = None,
 ) -> ChartResponse:
     try:
         if hour < 0 or hour > 23:
@@ -511,6 +545,9 @@ async def chart_get(
             gender=gender,
             lang=lang,
             fix_leap=fix_leap,
+            include_horoscope=include_horoscope,
+            target_date=target_date,
+            target_hour=target_hour,
         )
         share_url, share_ttl_seconds, share_notice = await create_visual_share_link(result.chart or {})
         result.visualization_url = share_url
@@ -530,6 +567,9 @@ async def chart(req: ChartRequest) -> ChartResponse:
             gender=req.gender,
             lang=req.lang,
             fix_leap=req.fix_leap,
+            include_horoscope=req.include_horoscope,
+            target_date=req.target_date,
+            target_hour=req.target_hour,
         )
         share_url, share_ttl_seconds, share_notice = await create_visual_share_link(result.chart or {})
         result.visualization_url = share_url
