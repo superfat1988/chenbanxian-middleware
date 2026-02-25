@@ -226,6 +226,7 @@ ${MIDDLEWARE_BASE_URL}/chart_get?date=...&hour=...&gender=...
 - `VIS_SHARE_PUBLIC_BASE`：短链公开域名（用于 token 回退拼接）
 - `VIS_SHARE_TTL_SECONDS`：短链保留时长（默认 `7200`）
 - `VIS_SHARE_TIMEOUT_SECONDS`：分享 API 超时秒数
+- `CORS_ALLOW_ORIGINS`：允许跨域来源（逗号分隔，默认 `*`，便于局域网网页直接调用）
 
 ---
 

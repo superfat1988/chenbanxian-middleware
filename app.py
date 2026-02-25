@@ -8,11 +8,26 @@ from typing import Any, Literal
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 load_dotenv()
 
-app = FastAPI(title="Chenbanxian Middleware", version="0.5.1")
+app = FastAPI(title="Chenbanxian Middleware", version="0.5.2")
+
+# 允许局域网前端跨域访问（默认 *，可通过 CORS_ALLOW_ORIGINS 收敛）
+_cors_raw = os.getenv("CORS_ALLOW_ORIGINS", "*").strip()
+_cors_origins = [x.strip() for x in _cors_raw.split(",") if x.strip()]
+if not _cors_origins:
+    _cors_origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 ZIWEI_KEYWORDS = [
     "紫微",
@@ -429,7 +444,7 @@ async def answer_ziweidoushu_with_kb(
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "version": "0.5.1",
+        "version": "0.5.2",
         "open_notebook": notebook.base_url,
         "search_path": notebook.search_path,
         "llm_enabled": llm.enabled,
