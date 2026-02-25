@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-app = FastAPI(title="Chenbanxian Middleware", version="0.3.0")
+app = FastAPI(title="Chenbanxian Middleware", version="0.4.0")
 
 ZIWEI_KEYWORDS = [
     "紫微",
@@ -222,6 +222,17 @@ async def answer_direct_llm(question: str) -> str:
     return await llm.chat(system=system, user=user, temperature=0.5)
 
 
+async def answer_ziweidoushu_fallback_without_kb(question: str) -> str:
+    system = (
+        "你是陈半仙。当前知识库未命中时，先明确表达："
+        "‘师傅这一项还没亲授，我得先去翻资料再给你稳妥答复。’"
+        "然后给出一个保守、可执行的初步建议，不要装作已经掌握全部细节。"
+        f"{build_answer_policy()}"
+    )
+    user = f"用户问题：{question}"
+    return await llm.chat(system=system, user=user, temperature=0.45)
+
+
 async def answer_ziweidoushu_with_kb(question: str, evidence_hits: list[dict[str, Any]], citations: list[str]) -> str:
     snippets: list[str] = []
     for h in evidence_hits[:5]:
@@ -254,7 +265,7 @@ async def answer_ziweidoushu_with_kb(question: str, evidence_hits: list[dict[str
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "version": "0.3.0",
+        "version": "0.4.0",
         "open_notebook": notebook.base_url,
         "search_path": notebook.search_path,
         "llm_enabled": llm.enabled,
@@ -357,6 +368,11 @@ async def ask(req: AskRequest) -> AskResponse:
     strong_hits, citations = pick_evidence(hits, float(retrieval_params["minimum_score"]))
 
     if not strong_hits:
+        fallback_answer = "师傅这一项还没亲授，我得先去翻资料再给你稳妥答复。"
+        try:
+            fallback_answer = await answer_ziweidoushu_fallback_without_kb(question)
+        except Exception:
+            pass
         return AskResponse(
             should_answer=True,
             uncertain=True,
@@ -364,7 +380,7 @@ async def ask(req: AskRequest) -> AskResponse:
             retrieval_params=retrieval_params,
             raw_hits=len(hits),
             citations=[],
-            answer="我不确定。当前知识库证据不足，不能负责任地下结论。",
+            answer=fallback_answer,
         )
 
     try:

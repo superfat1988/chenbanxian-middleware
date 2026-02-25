@@ -4,7 +4,7 @@
 - 紫微斗数问题走知识库检索
 - 非紫微问题直连你自己的大模型（不走搜索引擎）
 - 触发规则可控（私聊/群聊）
-- 低证据时拒答（降低幻觉）
+- 紫微问题知识库未命中时，自动走 LLM 补答，并明确“师门未授、需查证”语义
 - 支持一键安装 / 一键卸载
 
 > 设计原则：只做编排，不重复造检索引擎。检索能力交给 Open Notebook。
@@ -15,9 +15,8 @@
 
 - 一个 FastAPI 服务：`POST /ask`、`GET /health`、`GET /preflight`
 - 双路由能力：
-  - 紫微斗数 → Open Notebook 检索 + 证据综合
+  - 紫微斗数 → Open Notebook 检索优先；未命中则 LLM 补答（带“师门未授、需查证”语义）
   - 非紫微 → 直连 LLM（无搜索）
-- 一套重启后烟雾测试脚本：`scripts/smoke_test.sh`
 - 一键安装脚本：`scripts/install.sh`
 - 一键卸载脚本：`scripts/uninstall.sh`（支持 dry-run / purge）
 - 批量导入脚本：`scripts/batch_import_from_dir.sh`（把本地目录文件批量导入 notebook）
@@ -188,11 +187,10 @@ A: 可以。`install.sh` 检测到无 systemd 时会给你前台启动命令。
 
 ## 版本与定位
 
-当前版本：`v0.1`（MVP）
+当前版本：`v0.4`（MVP+）
 
 定位：
 - ✅ 做消息编排、路由、策略
 - ✅ 提供安装/卸载与导入工具
+- ✅ 支持紫微 KB 未命中时的 LLM 补答（含“需查证”语义）
 - ❌ 不替代 Open Notebook 检索/索引内核
-
-如果你要下一步（双路由：紫微走KB，非紫微直连LLM），可在本项目继续扩展。
